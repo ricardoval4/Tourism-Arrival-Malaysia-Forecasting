@@ -1,0 +1,487 @@
+---
+title: "Ricardo"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+#Install packages
+install.packages('fpp2') #plot, timeseries
+install.packages('xts') #convert timeseries data to dataframe
+install.packages('knitr') #kable for table
+install.packages('kableExtra') #kable extra for table
+```
+
+Stage 3 - Explore and Visualize Data
+
+First we will load library and load the data.
+```{r}
+###Load Library
+library(fpp2)
+library(xts)
+library(knitr)
+library(kableExtra)
+
+###Load Data
+Tourist_Arrivals_Monthly_Malaysia_1_ <- read.csv("~/Algorithm/3121/Tourist Arrival.csv")
+
+###Check Data
+head(Tourist_Arrivals_Monthly_Malaysia_1_)
+##Check Data Length
+length(Tourist_Arrivals_Monthly_Malaysia_1_$Date)
+##Check Data Maximum and Minimum Values
+max(Tourist_Arrivals_Monthly_Malaysia_1_$Tourists.Arrival)
+min(Tourist_Arrivals_Monthly_Malaysia_1_$Tourists.Arrival)
+```
+
+
+```{r}
+#Detect Data Outliers
+boxplot(Tourist_Arrivals_Monthly_Malaysia_1_$Tourists.Arrival,
+        main = "Boxplot of Tourism Arrival",
+        ylab = "Number of Tourism Arrival")
+```
+Overall, we can see that there is no outliers, indicated by no points that are above Q3 + 1.5 * IQR or below the Q1 - 1.5 * IQR of the data distribution
+
+```{r}
+#Check Missing Values
+Tourist_Arrivals_Monthly_Malaysia_1_ %>% is.na() %>% sum()
+```
+So, there is also no missing value indicated in the Tourism Data.
+
+WE will continue to plot the data to better see trends in the data.
+```{r}
+#Convert to time-series data
+tourist <- ts(Tourist_Arrivals_Monthly_Malaysia_1_$Tourists.Arrival, frequency =12, start= c(1989,1))
+
+#Then we visualize our data to chart
+autoplot(tourist) + 
+  ylab("Number of Tourist Arrival") + 
+  ggtitle('Time Series Plot of Monthly Tourist Arrival In Malaysia')
+
+#Plot with geom smooth to see average trend
+autoplot(tourist) +geom_smooth() +
+  ylab("Number of Tourist Arrival") + 
+  ggtitle('Time Series Plot of Monthly Tourist Arrival In Malaysia with Smoothed Graph')
+```
+
+```{r}
+ggsubseriesplot(tourist)+
+  ylab("Number of Tourist Arrival") + 
+  ggtitle('Subseriesplot of Monthly Tourist Arrival In Malaysia')
+```
+
+```{r}
+ggseasonplot(tourist)+
+  ylab("Number of Tourist Arrival") + 
+  ggtitle('Seasonality plot of Monthly Tourist Arrival In Malaysia')
+```
+
+
+```{r}
+#Plot ggAcf
+ggAcf(tourist) + 
+  ggtitle('ACF plot of Monthly Tourist Arrival In Malaysia')
+```
+
+
+```{r}
+#Determine full dataset
+full_dataset <- window(tourist, start= c(2005,01), end=c(2021,03))
+
+#Plot our final full_dataset
+autoplot(full_dataset) + 
+  ylab("Number of Tourist Arrival") + 
+  ggtitle('Full Data Set')
+```
+
+
+Stage 5 
+Split our data to precovid data and postcovid data
+Pre-covid - Jan 2005 - Jan 2020
+Covid - Feb 2020 - march 2021
+
+```{r}
+#Data split for precovid and postcovid
+precovid <- window(tourist, start= c(2005,01), end=c(2020,01))
+covid <- window(tourist, start=c(2020,02), end=c(2021,03))
+```
+
+```{r}
+#Plot precovid data to better understand the trend of Malaysia tourism before COVID
+autoplot(precovid) + 
+  ylab("Number of Tourist Arrival") + 
+  ggtitle('Time Series Plot of Monthly Tourist Arrival In Malaysia before COVID-19')
+```
+
+
+Divide precovid dataset into training and test set (80/20)- state the length 
+```{r}
+# Dividing precovid data to train set and test set
+precovid.train <- window(precovid, end = c(2017,1)) # 80
+precovid.test <- window(precovid, start= c(2017,2)) # 20 
+
+#Check Train set and Test set
+precovid.train
+precovid.test
+
+#Check number of observation for each set
+length(precovid.train)
+length(precovid.test)
+```
+
+```{r}
+#Then we plot precovid.train to better understand the trend to select the method/models
+autoplot(precovid.train) + 
+  ylab("Number of Tourist Arrival") + 
+  ggtitle('Time Series Plot of Monthly Tourist Arrival In Malaysia for Training Data')
+```
+
+
+```{r}
+#Decomposition to see better components of our training data.
+precovid.train %>% decompose() %>% plot()
+```
+
+
+Stage 6 
+
+The models that we are using are Drive method, ETS MAdM model, and ETS MAdN model.
+```{r}
+#Simple Forecasting Method
+
+### We choose to do Random Walk Drift, as the training set of data clearly indicates that there is overall linear upward trend, despite the variance changes overtime.
+### Fit Drift Method in Training Set
+RWD <- rwf(precovid.train, drift = TRUE) 
+summary (RWD)
+
+#Fitted RWD
+RWD.fit <- fitted(RWD)
+```
+
+
+```{r}
+# ETS 1 model (MAdM)
+ETS.1<- ets(precovid.train, model = "MAM", damped= TRUE)
+summary (ETS.1)
+
+#Fitted ETS 1
+ETS.1.fit <- fitted(ETS.1)
+```
+
+
+```{r}
+# ETS 2 model (M Ad N)
+ETS.2<- ets(precovid.train, model = "MAN", damped= TRUE)
+summary (ETS.2)
+
+#Fitted ETS 2
+ETS.2.fit <- fitted(ETS.2)
+```
+
+Use the ETS function in R to automatically set an ETS model 
+```{r}
+# ETS default
+ETS.3 <- ets(precovid.train)
+summary(ETS.3)
+
+#We do not fit this ETS model as it correlates with the previously mentioned M Ad M model.
+```
+
+Table for summary measures (parametres estimates, initial values, summary measures)
+```{r}
+###Create dataframe
+Variables <- c("alpha","beta","gamma","phi","l","b","s","sigma","AIC", "AICc", "BIC", "RMSE")
+M_Ad_M <- c(0.5332, 0.0016, 1e-04, 0.98, 1348745.2912, 18260.3124, "1.1057, 0.9963, 1.0058, 0.9625, 1.0064, 1.0353,
+           1.0045, 0.973, 0.9565, 1.0328, 0.9151, 1.0059", 0.0614, 4126.835, 4132.264, 4180.416, 115552.2)
+M_Ad_N <- c(0.2665, 0.0027, "-", 0.98, 1373446.5121, 2728.4409, "-", 0.0805, 4192.281, 4192.890, 4210.142, 159485.2)
+Table_summary <- data.frame(Variables, M_Ad_M, M_Ad_N)
+Table_summary
+```
+
+```{r}
+###Create Table
+Table_summary %>%
+  kbl(caption = "Estimated Smoothing Parameters Summary") %>%
+  kable_classic(full_width = F, html_font = "Cambria")
+```
+
+
+Produce separate plots of the training set data with the fitted values from each models
+```{r}
+#Random Walk Drift Plot
+autoplot(precovid.train, series = "Training Data") + 
+  xlab("Year") +
+  ylab("Number of Tourist Arrival in Malaysia") +
+  ggtitle("Within Sample Forecast against Training Data") +
+  autolayer(RWD.fit, series = "Random Walk Drift Method")  
+
+#ETS (M Ad M) Plot
+autoplot(precovid.train, series = "Training Data") + 
+  xlab("Year") +
+  ylab("Number of Tourist Arrival in Malaysia") +
+  ggtitle("Within Sample Forecast against Training Data") +
+  autolayer(ETS.1.fit, series = "ETS(M Ad M)")
+
+#ETS (M Ad N) Plot
+autoplot(precovid.train, series = "Training Data") + 
+  xlab("Year") +
+  ylab("Number of Tourist Arrival in Malaysia") +
+  ggtitle("Within Sample Forecast against Training Data") +
+  autolayer(ETS.2.fit, series = "ETS(M Ad N)")
+```
+
+Residual Diagnostic Checks
+
+```{r}
+checkresiduals(RWD) # Random Walk Drift
+checkresiduals(ETS.1) #Multiplicative Holt-Winters' Method Damped with Multiplicative Errors
+checkresiduals(ETS.2) #Holt Method with Multiplicative Errors
+```
+Best Goodness of Fit : ETS.1
+
+Based on the three models/methods that have been used in doing the within sample forecast, we will apply the same models to the test set, generating Out-of-Sample Forecast.
+
+Forecast is produced using test set
+```{r}
+# Drift Method 
+RWD.fc <- rwf(precovid.train, drift = TRUE, h = length(precovid.test))
+
+## ETS(M Ad M) Model
+
+ETS.1.fc <-forecast(ETS.1, h=length(precovid.test))
+
+## ETS(M Ad N) Model
+ETS.2.fc <- forecast(ETS.2, h=length(precovid.test))
+```
+
+Plot our forecast for the test set
+```{r}
+# Forecast Random Walk Drift Plot
+autoplot(precovid, series= "Full dataset") +
+  xlab("Years") +
+  ylab("Number of Tourist Arrivals in Malaysia") +
+  ggtitle("Forecast of Test Set with Random Walk Drift") +
+  autolayer(RWD.fc, series = "Random Walk Drift Method", PI = FALSE) 
+ 
+# Forecast ETS (M A M) Plot
+autoplot(precovid, series= "Full dataset") +
+  xlab("Years") +
+  ylab("Number of Tourist Arrivals in Malaysia") +
+  ggtitle("Forecast of Test Set with ETS(M Ad M) Model") +
+  autolayer(ETS.1.fc, series ="M Ad M", PI = FALSE) 
+
+# Forecast ETS (M Ad N) Plot
+autoplot(precovid, series= "Full dataset") +
+  xlab("Years") +
+  ylab("Number of Tourist Arrivals in Malaysia") +
+  ggtitle("Forecast of Test Set with ETS(M Ad N) Model") +
+  autolayer(ETS.2.fc, series = "M Ad N", PI = FALSE)
+```
+
+Stage 7 : Evaluate and Compare Forecasting Performance 
+
+Traditional Approach using the out-of-sample forecast accuracy
+```{r}
+#Out of sample forecast accuracy for Random Walk Drift 
+accuracy(RWD.fc, precovid.test)
+
+#Out of sample forecast accuracy for ETS (M Ad M)
+accuracy(ETS.1.fc, precovid.test)
+
+#Out of sample forecast accuracy for ETS (M Ad N)
+accuracy(ETS.2.fc, precovid.test)
+```
+
+
+Modern Approach 
+```{r}
+#### For h = 1
+# Error in Cross-Val method for Random Walk Drift
+e.rwf <- tsCV(precovid.train, rwf, h=1)
+
+# Error in Cross-Val method for ETS (M Ad M)
+f.1 <- function(y,h)   {forecast(ets(y,model = "MAM", damped = TRUE),h= h)} # ETS.1
+e.ETS.1 <- tsCV(precovid.train, f.1, h=1)
+
+# Error in Cross-Val method for ETS (M Ad N)
+f.2 <- function(y,h)   {forecast(ets(y,model = "MAN", damped = TRUE),h= h)} # ETS.2
+e.ETS.2 <- tsCV(precovid.train, f.2, h=1)
+```
+
+```{r}
+#### For h = 12
+# Error in Cross-Val method for Random Walk Drift
+e.rwf_ <- tsCV(precovid.train, rwf, h=12)
+
+# Error in Cross-Val method for ETS (M Ad M)
+f.1_ <- function(y,h)   {forecast(ets(y,model = "MAM", damped = TRUE),h= h)} # ETS.1
+e.ETS.1_ <- tsCV(precovid.train, f.1_, h=12)
+
+# Error in Cross-Val method for ETS (M Ad N)
+f.2_ <- function(y,h)   {forecast(ets(y,model = "MAN", damped = TRUE),h= h)} # ETS.2
+e.ETS.2_ <- tsCV(precovid.train, f.2_, h=12)
+```
+
+To compute MSE from h=1 to h=12
+```{r}
+# Modern Approach MSE for Random Walk Drift
+colMeans(e.rwf_^2, na.rm = TRUE)
+
+# Modern Approach MSE for ETS (M Ad M)
+colMeans(e.ETS.1_^2, na.rm = TRUE)
+
+# Modern Approach MSE for ETS (M Ad N)
+colMeans(e.ETS.2_^2, na.rm = TRUE)
+```
+
+
+Compute RMSE 
+```{r}
+###For h = 1
+# Modern Approach RMSE for Random Walk Drift
+mean(e.rwf^2, na.rm = TRUE) %>% 
+  sqrt()
+
+# Modern Approach RMSE for ETS (M Ad M)
+mean(e.ETS.1^2, na.rm = TRUE) %>% 
+  sqrt()
+
+# Modern Approach RMSE for ETS (M Ad N)
+mean(e.ETS.2^2, na.rm = TRUE) %>%
+  sqrt()
+
+```
+
+```{r}
+###For h = 12
+# Modern Approach RMSE for Random Walk Drift
+mean(e.rwf^2, na.rm = TRUE) %>% 
+  sqrt()
+
+# Modern Approach RMSE for ETS (M Ad M)
+sqrt(mean(e.ETS.1_^2, na.rm = TRUE))
+ 
+
+# Modern Approach RMSE for ETS (M Ad N)
+mean(e.ETS.2_^2, na.rm = TRUE) %>%
+  sqrt()
+```
+
+
+Stage 8 : Implement Forecast
+
+```{r}
+# Apply to the full pre-covid dataset
+#Re-estimate our parameter using precovid data set.
+ETS.1.fulldata <- ets(precovid, model = "MAM", damped= TRUE)
+summary (ETS.1.fulldata)
+```
+
+```{r}
+###Create dataframe
+Variables <- c("alpha","beta","gamma","phi","l","b","s","sigma","AIC", "AICc", "BIC", "RMSE")
+Final_Model <- c(0.5347, 1e-04, 1e-04, 0.9796, 1346393.6713, 18344.8017, "1.0939, 0.9744, 0.9985, 0.9599, 1.0112, 1.0473
+           1.0151, 0.9679, 0.9568, 1.0334, 0.9299, 1.0117", 0.0595, 5184.288, 5188.510, 5241.861, 115372.1)
+Table_summary.fm <- data.frame(Variables, Final_Model)
+Table_summary.fm
+```
+
+```{r}
+###Create Table
+Table_summary.fm %>%
+  kbl(caption = "Estimated Smoothing Parameters Summary for Final Model") %>%
+  kable_classic(full_width = F, html_font = "Cambria")
+```
+
+```{r}
+#Plot of Final Model Forecast
+ETS.1.fulldata.fc <-forecast(ETS.1.fulldata, h=length(covid), c(68, 95)) ## use rule of thumb to get the prediction interval
+autoplot(ETS.1.fulldata.fc) +
+  xlab("Year") +
+  ylab("Number of Tourist Arrival in Malaysia") +
+  ggtitle("Forecast During COVID-19 Period")
+```
+```{r}
+#Summary of the model
+summary(ETS.1.fulldata.fc)
+```
+
+```{r}
+#Plot of Final Model Forecast Compared to Actual Data During COVID-19
+autoplot(full_dataset)+
+  autolayer(ETS.1.fulldata.fc) +
+  xlab("Year") +
+  ylab("Number of Tourist Arrival in Malaysia") +
+  ggtitle("Forecast During COVID-19 Period")
+```
+
+Stage 9: Quantifying Forecasted Loss in tourism Revenue 
+
+To calculate the forecasted loss, we have to calculate the difference in the forecasted tourist number compared to the acutal number after Covid pandemic.
+
+```{r}
+#To obtain forecasted number
+FC <- summary(ETS.1.fulldata.fc)
+#Turn the data to data frame
+FC.df <- data.frame(FC)
+FC.df
+```
+
+```{r}
+#To obtain the actual tourism number
+dataset_covid <- as.xts(covid)
+dataset_covid <- data.frame(dataset_covid)
+dataset_covid
+```
+
+First, we calculate average forecasted loss in RM 
+```{r}
+#Then, we calculate the difference in the forecasted and the actual tourism number for each month 
+difference <- FC.df$Point.Forecast - dataset_covid$dataset_covid
+difference
+```
+
+```{r}
+#Finally, we calculate the total number of tourism loss due to COVID
+sum(difference)
+```
+
+```{r}
+#We then calculate the forecasted tourism revenue loss in dollar
+((851+843+783+736+746)/5) * sum(difference)
+#Assuming exchange rate of 4.15RM/$ (per September 13th)
+((851+843+783+736+746)/5) * sum(difference) * 4.15
+```
+
+Then, we calculate range of forecasted loss in RM, with 95% confidence level
+
+```{r}
+#For upper limit
+differenceup <- FC.df$Hi.95 - dataset_covid$dataset_covid
+differenceup
+```
+
+```{r}
+#For lower limit
+differencebelow <- FC.df$Lo.95 - dataset_covid$dataset_covid
+differencebelow
+```
+
+```{r}
+#Calculate the total number of tourism loss for both upper and lower limit
+sum(differenceup)
+sum(differencebelow)
+```
+
+```{r}
+#We then calculate the forecasted tourism revenue loss in dollar for both upper and lower limit
+((851+843+783+736+746)/5) * sum(differenceup)
+((851+843+783+736+746)/5) * sum(differencebelow)
+#Assuming exchange rate of 4.15RM/$ (per September 13th)
+((851+843+783+736+746)/5) * sum(differenceup) * 4.15
+((851+843+783+736+746)/5) * sum(differencebelow) * 4.15
+```

@@ -1,0 +1,420 @@
+---
+title: "ARIMA forecasting"
+author: "Ricardo"
+date: "9/25/2021"
+output: html_document
+---
+
+```{r}
+#Install packages
+install.packages('fpp2') #plot, timeseries
+install.packages('xts') #convert timeseries data to dataframe
+install.packages('kableExtra') #kable extra for table
+```
+
+```{r}
+###Load Library
+library(fpp2)
+library(xts)
+library(kableExtra)
+```
+
+```{r}
+###Load Data
+Tourist_Arrivals_Monthly_Malaysia_1_ <- read.csv("~/Algorithm/3121/Tourist Arrival.csv")
+
+###Check Data
+head(Tourist_Arrivals_Monthly_Malaysia_1_)
+##Check Data Length
+length(Tourist_Arrivals_Monthly_Malaysia_1_$Date)
+##Check Data Maximum and Minimum Values
+max(Tourist_Arrivals_Monthly_Malaysia_1_$Tourists.Arrival)
+min(Tourist_Arrivals_Monthly_Malaysia_1_$Tourists.Arrival)
+```
+
+```{r}
+#Convert to time-series data
+tourist <- ts(Tourist_Arrivals_Monthly_Malaysia_1_$Tourists.Arrival, frequency =12, start= c(1989,1))
+
+#Plot Tourist Data
+autoplot(tourist) + 
+  ylab("Number of Tourist Arrivals") + 
+  ggtitle('Time Series Plot of Monthly Tourist Arrival In Malaysia')
+```
+
+```{r}
+#Determine full dataset
+#To reflect 10 years trend
+full_dataset <- window(tourist, start= c(2010,01), end=c(2021,03))
+
+#Plot our final full_dataset
+autoplot(full_dataset) + 
+  ylab("Number of Tourist Arrival") + 
+  ggtitle('Full Data Set')
+```
+
+
+
+
+Phase 1 : Identification 
+```{r}
+#Data split for precovid and postcovid
+precovid <- window(tourist, start= c(2010,01), end=c(2020,01))
+covid <- window(tourist, start=c(2020,02), end=c(2021,03))
+```
+
+```{r}
+# Dividing precovid data to train set and test set
+precovid.train <- window(precovid, end = c(2018,1)) # 80
+precovid.test <- window(precovid, start= c(2018,2)) # 20 
+```
+
+```{r}
+#Plot train data
+autoplot(precovid.train) + 
+  ylab("Number of Tourist Arrival") + 
+  ggtitle('Time Series Plot of Monthly Tourist Arrival In Malaysia - Precovid')
+```
+
+```{r}
+#Look at Train Data ggtsdisplay()
+ggtsdisplay(precovid.train)
+```
+The mean is not zero and constant and the variance is arguably constant. There is slight seasonality in the ACF as the seasonal lags of 12, 24 are significant. As there is a clear seasonal pattern, we might need to take seasonal difference.  
+
+No box cox is needed based on the visualization, where variance is arguably stable across the year.
+We can re-confirm this by testing box-cox lambda.
+```{r}
+#Boxcox-Lambda
+lambda.tourist <- BoxCox.lambda(precovid.train)
+
+precovid.train.bc <- BoxCox(precovid.train, lambda = lambda.tourist)
+
+BoxCox.lambda(precovid.train)
+```
+
+Lambda is close to 2, where it means that after box-cox y = y^2. As a result, the variance would stay the same, with only the values become much larger after being squared. Hence, no further box-cox is needed for the data.
+This is shown in the chart below.
+
+```{r}
+#Precovid train after Box-cox
+autoplot(precovid.train.bc) + 
+  ylab("Number of Tourist Arrival") + 
+  ggtitle('Box-Cox Time Series Plot of Monthly Tourist Arrival In Malaysia - Precovid')
+```
+
+Next, we will test whether seasonal difference is required  
+```{r}
+#Test seasonal differencing
+precovid.train %>% nsdiffs()
+```
+Seasonal difference is required, based on the result.
+
+```{r}
+#Plot of data after seasonal differencing
+precovid.train %>% diff(lag=12) %>% autoplot + 
+  ggtitle('Time Series Plot After Seasonal Differencing')
+```
+After taking a seasonal difference, notice that from the visualization it is hard to argue that the mean and the variance is relatively constant.
+
+So, we will test if non-seasonal difference is required 
+```{r}
+precovid.train %>% diff(lag=12) %>% ndiffs()
+```
+A first difference is not required based on ndiffs(). However, the visualization might show otherwise, as the mean is not relatively constant across the time series.
+
+So, we will apply first differencing.
+```{r}
+#plot after first differencing
+precovid.train %>% diff(lag=12) %>% diff() %>%  autoplot  + 
+  ggtitle('Time Series Plot After Seasonal and Non-Seasonal Differencing')
+```
+Notice how the plot become arguably cleaner, where we can note that the mean and the variance is constant throughout the time-series
+
+```{r}
+#ggtsdisplay() after first differencing
+precovid.train %>% diff(lag=12) %>% diff() %>% ggtsdisplay() 
+```
+After taking a first difference, the series is now stationary.
+
+Perform KPSS Test to test whether the time series is stationary. 
+
+```{r}
+#Comparison
+cbind("Original" = precovid.train,
+      "S.diff" =
+        diff((precovid.train),12), 
+      "S.diff + 1st diff" =
+        diff(diff(precovid.train),12)) %>% 
+  autoplot(facets=TRUE) +
+    xlab("Year") + ylab("") +
+    ggtitle("Monthly Tourist Arrivals in Malaysia")
+```
+
+
+```{r}
+library(urca)
+precovid.train  %>% diff(lag=12) %>% diff() %>% ur.kpss %>%summary()
+```
+Test statistic is significantly lower than the critical value of 1%, indicating that the we do not reject the null hypothesis. We can conclude that the time series is stationary. 
+
+###
+ARIMA model selection
+###
+
+Based on the ACF, it has a significant autocorrelation at lag 1, we can consider MA(1) which q = 1 or in ARIMA(0,1,1). There is a significant spike at lag 12 in ACF suggest seasonal MA(1). ARIMA(P,D,Q) = ARIMA(0,1,1). The first model identify would be ARIMA(0,1,1)(0,1,1)
+
+It is also argued that in PACF, we observed significant partial autocorrelation in lag 2 , this may suggest a potential AR(2) , ARIMA(2,1,0). There is a significant spike at lag 12 in ACF suggest seasonal AR(1). ARIMA(P,D,Q) = ARIMA(1,1,0). Besides that, lag 24 is close to the critical line, hence we might argue that there is seasonal AR(2), ARIMA(2,1,0) 
+
+We also do not include constant as we beleive that in the long run it would not be a quadratic trend
+
+ARIMA(p,d,q)(P,D,Q) without constant
+
+1. ARIMA(0,1,1)(0,1,1)m nonseasonal MA & seasonal MA
+2. ARIMA(2,1,0)(1,1,0)m non-s AR & seasonal AR
+3. ARIMA(2,1,0)(2,1,0)m Seasonal AR(2) is arguable as lag 24 PACF close to the critical line
+
+m=12 (monthly)
+
+Constant 
+We took a differencing order of 2 and when d + D = 2, there is two option, which is with intercept or without intercept. 
+when d+D=2, c = 0 , EFF will follow a straight line with intercept and slope determined by the last few observations.
+when d+D, c not equal 0,  EFF will follow a quadratic trend.
+
+We assume there would be no constant, especially as number of traveller would not be able to go in quadratic trend in the long run, due to limited resources, that will hamper the number of tourism growth.
+
+
+
+Phase 2 : Estimation and Testing
+
+So first, we will select two models based on AICc performance of the models
+We will fit the model and look at the parameter estimates of our chosen model
+```{r}
+fit.1 <- Arima(precovid.train, order = c(0,1,1), 
+              seasonal = c(0,1,1), include.constant = F)
+
+summary(fit.1)
+```
+
+```{r}
+fit.2 <- Arima(precovid.train, order = c(2,1,0), 
+              seasonal = c(1,1,0), include.constant = F)
+
+summary(fit.2)
+```
+
+```{r}
+fit.3 <- Arima(precovid.train, order = c(2,1,0), 
+              seasonal = c(2,1,0), include.constant = F)
+
+summary(fit.3)
+```
+
+```{r}
+c(fit.1$aicc, fit.2$aicc, fit.3$aicc)
+```
+
+So, we conclude that fit.1 and fit.2 perform better than the other model.
+
+Other than the model choosed, we will perform auto.arima to find the R default best performing model.
+
+```{r}
+#Auto Arima train
+auto.arima(precovid.train, stepwise = FALSE)
+```
+
+
+```{r}
+#Auto.arima fit
+fit.4 <- Arima(precovid.train, order = c(0,0,4), 
+              seasonal = c(0,1,1), include.constant = F)
+
+summary(fit.4)
+```
+
+Report the parameter estimates
+
+```{r}
+#Check Residuals
+checkresiduals(fit.1)
+checkresiduals(fit.2)
+checkresiduals(fit.4)
+```
+Looking at the ACF, most of the sample autocorrelation is within the blue dotted line, except lag 5 and 6 of ARIMA(0,1,1)(0,1,1)[12] model. However, high p and q value would lead to over fitting, hence we do not perform any re-identification. Besides that, we will look at the Ljung box test. Testing up to lag 19 here and the p-value is greater than alpha of 0.05, so we do not reject null hypothesis of all three models, and we can concluded that the series is a white noise. No re-identification is needed for three of the models. 
+
+```{r}
+#Reidentification
+residuals(fit.2) %>% ggtsdisplay()
+```
+It is arguable that in the Seasonal component at PACF's lag 24, the line almost crossed the critical autocorrelation limit. As such, we will set Q=2 in Seasonal Arima component. We will not reidentify the non-seasonal component as it turns significant in lag 5 and 6, which the high order of differencing might lead to overfitting.
+
+```{r}
+#Auto.arima fit
+fit.2.1 <- Arima(precovid.train, order = c(2,1,0), 
+              seasonal = c(1,1,2), include.constant = F)
+
+summary(fit.2.1)
+```
+
+```{r}
+#Checkresiduals
+checkresiduals(fit.2.1)
+```
+
+
+We then proceed to produce forecast for test set to see which one is the best performing
+Produce forecast for test set using fit.1, fit.2, fit.4
+```{r}
+fc.precovid.1 <- forecast(fit.1, h = length(precovid.test))
+fc.precovid.2 <- forecast(fit.2, h = length(precovid.test))
+fc.precovid.4 <- forecast(fit.4, h = length(precovid.test))
+```
+
+Evaluate forecast accuracy 
+```{r}
+accuracy(fc.precovid.1, precovid.test)
+accuracy(fc.precovid.2, precovid.test)
+accuracy(fc.precovid.4, precovid.test)
+```
+Model fit.4 is a far better forecasting model compare to fit.1 and fit.2, based on training set RMSE and test set RMSE. AICc in determining the suitable model is not applicable as there is different number in differencing order.
+
+So we will proceed to application with fit.4
+
+Phase 3 : Application 
+Final model
+```{r}
+precovid.1 <- Arima(precovid, order = c(0,0,4), 
+              seasonal = c(0,1,1), include.constant = F)
+
+summary(precovid.1)
+```
+
+Product forecast for covid 
+```{r}
+fc.ARIMA <- forecast(precovid.1, h= length(covid), c(68, 95))
+
+autoplot(fc.ARIMA)
+```
+
+```{r}
+autoplot(full_dataset)+
+  autolayer(fc.ARIMA) +
+  xlab("Year") +
+  ylab("Number of Tourist Arrival in Malaysia") +
+  ggtitle("Forecast During COVID-19 Period by ARIMA(0,0,4)(0,1,1)[12]")
+```
+
+Comparison with an ETS Model
+
+Default R ETS forecasting
+```{r}
+# ETS default
+ETS <- ets(precovid)
+summary(ETS)
+```
+
+Fit the model to forecast covid period
+
+```{r}
+ETS.fc <-forecast(ETS, h=length(covid), c(68, 95))
+
+autoplot(ETS.fc) +
+  xlab("Year") +
+  ylab("Number of Tourist Arrival in Malaysia") +
+  ggtitle("Forecast During COVID-19 Period by ETS(M,N,A)")
+```
+
+```{r}
+autoplot(full_dataset)+
+  autolayer(ETS.fc, alpha = 0.7, series = ("ETS")) +
+  autolayer(fc.ARIMA, alpha = 0.3, series = ("ARIMA"))+
+  xlab("Year") +
+  ylab("Number of Tourist Arrival in Malaysia") +
+  ggtitle("Forecast During COVID-19 Period")
+```
+
+To look at the component
+```{r}
+summary(ETS.fc)
+summary(fc.ARIMA)
+```
+
+```{r}
+accuracy(ETS.fc, covid)
+accuracy(fc.ARIMA, covid)
+```
+
+####
+Forecasting Average Lost
+####
+
+First we obtain the actual tourism number
+```{r}
+#To obtain the actual tourism number
+dataset_covid <- as.xts(covid)
+dataset_covid <- data.frame(dataset_covid)
+dataset_covid
+```
+
+So, for ETS model:
+
+```{r}
+#To obtain forecasted number
+FC.ETS <- summary(ETS.fc)
+#Turn the data to data frame
+FC.ETS.df <- data.frame(FC.ETS)
+FC.ETS.df
+```
+
+First, we calculate average forecasted loss in RM 
+```{r}
+#Then, we calculate the difference in the forecasted and the actual tourism number for each month 
+difference.ETS <- FC.ETS.df$Point.Forecast - dataset_covid$dataset_covid
+difference.ETS
+```
+
+```{r}
+#Then, we calculate the total number of tourism loss due to COVID
+sum(difference.ETS)
+```
+
+```{r}
+#We then calculate the forecasted tourism revenue loss in dollar based on past 5-year average
+((851+843+783+736+746)/5) * sum(difference.ETS)
+#Assuming exchange rate of 4.18RM/$ (per October 9th)
+((851+843+783+736+746)/5) * sum(difference.ETS) * 4.18
+```
+
+
+So, for ARIMA model:
+
+```{r}
+#To obtain forecasted number
+FC.ARIMA <- summary(fc.ARIMA)
+#Turn the data to data frame
+FC.ARIMA.df <- data.frame(FC.ARIMA)
+FC.ARIMA.df
+```
+
+We calculate average forecasted loss in RM 
+```{r}
+#Then, we calculate the difference in the forecasted and the actual tourism number for each month 
+difference.ARIMA <- FC.ARIMA.df$Point.Forecast - dataset_covid$dataset_covid
+difference.ARIMA
+```
+
+```{r}
+#Then, we calculate the total number of tourism loss due to COVID
+sum(difference.ARIMA)
+```
+
+```{r}
+#We then calculate the forecasted tourism revenue loss in dollar based on past 5-year average
+((851+843+783+736+746)/5) * sum(difference.ARIMA)
+#Assuming exchange rate of 4.18RM/$ (per October 9th)
+((851+843+783+736+746)/5) * sum(difference.ARIMA) * 4.18
+```
+
+So, ARIMA model puts heavier weight on forecasted loss (MYR92.3 billion) as the model predicted the number of traveller to be relatively stagnant, compared to ETS model(MYR85.8 billion) that predicted the number to decreases moderately, implying that ETS model made less forecasting deviance in this case.
+
+
